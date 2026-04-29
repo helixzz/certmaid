@@ -1,0 +1,55 @@
+# ============================================
+# certmaid 示例配置文件
+# ============================================
+# 复制此文件到 /etc/certmaid/config.yaml 并修改
+
+# 全局默认值
+defaults:
+  renew_before: 720h            # 证书到期前 30 天开始续签
+  check_interval: 12h           # systemd timer 检查间隔
+  key_type: RSA2048             # 私钥类型
+  key_algorithm: rsa
+  challenge: http-01            # 验证方式
+  cert_dir_mode: 0750
+  cert_file_mode: 0640
+
+# CA 后端配置
+backends:
+  vault:
+    # ACME 模式（推荐，Vault 1.14+）
+    acme:
+      enabled: true
+      directory_url: "https://vault.example.com:8200/v1/pki/acme/directory"
+      eab:
+        kid: ""
+        hmac_key: "${VAULT_EAB_HMAC_KEY}"   # 从环境变量读取
+
+# 输出路径
+output:
+  base_dir: "/etc/certmaid/certs"
+
+# 全局 Hook
+hooks:
+  post_renew:
+    nginx_reload: true
+    nginx_config_test: true
+
+# 日志
+logging:
+  level: info
+  format: json
+  file: "/var/log/certmaid/certmaid.log"
+
+# ============================================
+# 证书列表
+# ============================================
+certificates:
+  - name: example-web
+    domains:
+      - example.com
+      - www.example.com
+    backend: vault
+    output:
+      cert_path: "/etc/nginx/ssl/example.com.crt"
+      key_path: "/etc/nginx/ssl/example.com.key"
+      chain_path: "/etc/nginx/ssl/example.com.chain.crt"
