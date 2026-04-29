@@ -1,0 +1,16 @@
+[Unit]
+Description=CertMaid Certificate Renewal
+Documentation=https://github.com/helixzz/certmaid
+After=network-online.target nss-lookup.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/certmaid run --config /etc/certmaid/config.yaml
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/etc/certmaid /etc/nginx/ssl /var/log/certmaid
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

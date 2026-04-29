@@ -1,0 +1,6 @@
+build/
+*.log
+.env
+*.bak
+.idea/
+.vscode/
