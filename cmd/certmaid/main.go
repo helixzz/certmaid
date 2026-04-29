@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -16,6 +18,7 @@ import (
 
 	"github.com/helixzz/certmaid/internal/backend"
 	"github.com/helixzz/certmaid/internal/config"
+	"github.com/helixzz/certmaid/internal/health"
 	"github.com/helixzz/certmaid/internal/hook"
 	"github.com/helixzz/certmaid/internal/manager"
 	"github.com/helixzz/certmaid/internal/systemd"
@@ -322,6 +325,49 @@ func main() {
 	}
 	configShowCmd.Flags().StringVarP(&cfgPath, "config", "c", "/etc/certmaid/config.yaml", "config file path")
 
+	healthCmd := &cobra.Command{
+		Use:   "health",
+		Short: "Check certificate health and report status",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			logger := newLogger(logLevel)
+			defer logger.Sync()
+
+			cfg, err := config.Load(cfgPath)
+			if err != nil {
+				return fmt.Errorf("loading config: %w", err)
+			}
+
+			mgr, err := buildManager(cfg, logger)
+			if err != nil {
+				return fmt.Errorf("building manager: %w", err)
+			}
+
+			output, _ := cmd.Flags().GetString("output")
+
+			ctx := context.Background()
+			result, err := health.Check(ctx, mgr)
+
+			switch {
+			case err == nil:
+				printHealthResult(result, output)
+				os.Exit(0)
+
+			case errors.Is(err, health.ErrNeedsRenewal):
+				printHealthResult(result, output)
+				os.Exit(1)
+
+			default:
+				printHealthResult(result, output)
+				os.Exit(2)
+			}
+
+			return nil
+		},
+	}
+	healthCmd.Flags().StringVarP(&cfgPath, "config", "c", "/etc/certmaid/config.yaml", "config file path")
+	healthCmd.Flags().String("output", "json", "output format (json or text)")
+	healthCmd.Flags().StringVar(&logLevel, "log-level", "info", "log level (debug, info, warn, error)")
+
 	versionCmd := &cobra.Command{
 		Use:   "version",
 		Short: "Print version",
@@ -331,7 +377,7 @@ func main() {
 	}
 
 	configCmd.AddCommand(configValidateCmd, configShowCmd)
-	rootCmd.AddCommand(runCmd, statusCmd, renewCmd, installCmd, uninstallCmd, configCmd, versionCmd)
+	rootCmd.AddCommand(runCmd, statusCmd, renewCmd, installCmd, uninstallCmd, configCmd, healthCmd, versionCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -350,15 +396,9 @@ func buildManager(cfg *config.Config, logger *zap.Logger) (*manager.Manager, err
 		}
 		eabKid := v.ACME.EAB.KID
 		eabKey := v.ACME.EAB.HMACKey
-		if eabKey == "" {
-			eabKey = os.Getenv("VAULT_EAB_HMAC_KEY")
-		}
 		b = backend.NewVaultBackend(vaultURL, eabKid, eabKey)
 	} else if v.API.Enabled {
 		addr := v.API.Address
-		if addr == "" {
-			addr = os.Getenv("VAULT_ADDR")
-		}
 		if addr == "" {
 			return nil, fmt.Errorf("vault API address is required when vault API is enabled")
 		}
@@ -386,9 +426,6 @@ func buildManager(cfg *config.Config, logger *zap.Logger) (*manager.Manager, err
 			}
 			vb.SetToken(strings.TrimSpace(string(tokenBytes)))
 
-		case os.Getenv("VAULT_TOKEN") != "":
-			vb.SetToken(os.Getenv("VAULT_TOKEN"))
-
 		case auth.AppRole.RoleIDFile != "" && auth.AppRole.SecretIDFile != "":
 			roleIDBytes, err := os.ReadFile(auth.AppRole.RoleIDFile)
 			if err != nil {
@@ -412,7 +449,7 @@ func buildManager(cfg *config.Config, logger *zap.Logger) (*manager.Manager, err
 			}
 
 		default:
-			return nil, fmt.Errorf("vault API enabled but no authentication configured: set token_file, approle, tls_cert, or VAULT_TOKEN env var")
+			return nil, fmt.Errorf("vault API enabled but no authentication configured: set token_file, approle, or tls_cert")
 		}
 		b = vb
 	} else {
@@ -456,4 +493,27 @@ func newLogger(level string) *zap.Logger {
 
 	core := zapcore.NewCore(zapcore.NewConsoleEncoder(cfg), ws, zapLevel)
 	return zap.New(core)
+}
+
+func printHealthResult(result *health.HealthResult, output string) {
+	if output == "text" {
+		fmt.Printf("Overall status: %s\n\n", result.Status)
+		fmt.Printf("%-30s %-15s %-10s %s\n", "NAME", "DAYS REMAINING", "HEALTHY", "DOMAINS")
+		fmt.Println(strings.Repeat("-", 90))
+		for _, d := range result.Details {
+			healthyStr := "YES"
+			if !d.Healthy {
+				healthyStr = "NO"
+			}
+			domains := d.Domains[0]
+			if len(d.Domains) > 1 {
+				domains += fmt.Sprintf(" (+%d more)", len(d.Domains)-1)
+			}
+			fmt.Printf("%-30s %-15d %-10s %s\n", d.Name, d.DaysRemaining, healthyStr, domains)
+		}
+		return
+	}
+
+	data, _ := json.MarshalIndent(result, "", "  ")
+	fmt.Println(string(data))
 }

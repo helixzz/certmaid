@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"reflect"
 	"time"
 
 	"github.com/go-viper/mapstructure/v2"
@@ -147,12 +148,24 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
+// StringExpandEnvHook returns a mapstructure decode hook that expands
+// environment variables in string fields using os.ExpandEnv.
+func StringExpandEnvHook() mapstructure.DecodeHookFunc {
+	return func(f reflect.Type, t reflect.Type, data interface{}) (interface{}, error) {
+		if f.Kind() != reflect.String || t.Kind() != reflect.String {
+			return data, nil
+		}
+		return os.ExpandEnv(data.(string)), nil
+	}
+}
+
 // viperDecoderOptions returns decoder config options that handle
 // time.Duration strings and weakly-typed numeric conversions (e.g. octal file modes).
 func viperDecoderOptions() []viper.DecoderConfigOption {
 	return []viper.DecoderConfigOption{
 		func(dc *mapstructure.DecoderConfig) {
 			dc.DecodeHook = mapstructure.ComposeDecodeHookFunc(
+				StringExpandEnvHook(),
 				mapstructure.StringToTimeDurationHookFunc(),
 				mapstructure.StringToSliceHookFunc(","),
 			)

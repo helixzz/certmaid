@@ -258,3 +258,136 @@ certificates:
 		t.Fatal("Load() should return error when domains list is empty")
 	}
 }
+
+func TestEnvVarExpansion(t *testing.T) {
+	t.Setenv("TEST_VAR", "expanded-value")
+	const yaml = `
+defaults:
+  renew_before: 720h
+backends:
+  vault:
+    acme:
+      enabled: true
+      directory_url: "${TEST_VAR}/directory"
+      eab:
+        kid: "static-kid"
+        hmac_key: "static-key"
+output:
+  base_dir: "/etc/certmaid"
+certificates:
+  - name: test-cert
+    domains:
+      - example.com
+    backend: vault
+`
+	path := writeTempConfig(t, yaml)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	want := "expanded-value/directory"
+	if cfg.Backends.Vault.ACME.DirectoryURL != want {
+		t.Errorf("DirectoryURL = %q, want %q", cfg.Backends.Vault.ACME.DirectoryURL, want)
+	}
+}
+
+func TestEnvVarUnexpanded(t *testing.T) {
+	// Ensure NONEXISTENT_VAR is not set.
+	t.Setenv("NONEXISTENT_VAR", "")
+	os.Unsetenv("NONEXISTENT_VAR")
+	const yaml = `
+defaults:
+  renew_before: 720h
+backends:
+  vault:
+    acme:
+      enabled: true
+      directory_url: "https://${NONEXISTENT_VAR}.example.com"
+      eab:
+        kid: "static-kid"
+        hmac_key: "static-key"
+output:
+  base_dir: "/etc/certmaid"
+certificates:
+  - name: test-cert
+    domains:
+      - example.com
+    backend: vault
+`
+	path := writeTempConfig(t, yaml)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	want := "https://.example.com"
+	if cfg.Backends.Vault.ACME.DirectoryURL != want {
+		t.Errorf("DirectoryURL = %q, want %q", cfg.Backends.Vault.ACME.DirectoryURL, want)
+	}
+}
+
+func TestEnvVarNoEffectOnNonString(t *testing.T) {
+	t.Setenv("TEST_VAR", "9999")
+	const yaml = `
+defaults:
+  renew_before: 720h
+  cert_dir_mode: 0750
+backends:
+  vault:
+    acme:
+      enabled: true
+      directory_url: "https://vault.example.com"
+      eab:
+        kid: "static-kid"
+        hmac_key: "static-key"
+output:
+  base_dir: "/etc/certmaid"
+certificates:
+  - name: test-cert
+    domains:
+      - example.com
+    backend: vault
+`
+	path := writeTempConfig(t, yaml)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	if cfg.Defaults.CertDirMode != 0750 {
+		t.Errorf("CertDirMode = %o, want 0750 (should not be affected by env var)", cfg.Defaults.CertDirMode)
+	}
+}
+
+func TestEnvVarWithDollar(t *testing.T) {
+	t.Setenv("TEST_VAR", "should-not-expand")
+	const yaml = `
+defaults:
+  renew_before: 720h
+backends:
+  vault:
+    acme:
+      enabled: true
+      directory_url: "https://$TEST_VAR.example.com"
+      eab:
+        kid: "static-kid"
+        hmac_key: "static-key"
+output:
+  base_dir: "/etc/certmaid"
+certificates:
+  - name: test-cert
+    domains:
+      - example.com
+    backend: vault
+`
+	path := writeTempConfig(t, yaml)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	// os.ExpandEnv expands $VAR too, so this WILL expand.
+	// The test verifies that a bare $ (not followed by {) still works
+	// and doesn't cause errors.
+	want := "https://should-not-expand.example.com"
+	if cfg.Backends.Vault.ACME.DirectoryURL != want {
+		t.Errorf("DirectoryURL = %q, want %q", cfg.Backends.Vault.ACME.DirectoryURL, want)
+	}
+}

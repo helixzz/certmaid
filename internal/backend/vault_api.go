@@ -137,7 +137,7 @@ func (v *VaultAPIBackend) Issue(ctx context.Context, spec certmaid.CertificateSp
 		"ttl":         ttl,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("issuing certificate for %q: %w", spec.Name, err)
+		return nil, fmt.Errorf("issuing certificate for %q: vault API call failed", spec.Name)
 	}
 	if secret == nil || secret.Data == nil {
 		return nil, fmt.Errorf("issuing certificate for %q: empty response from Vault", spec.Name)
