@@ -4,17 +4,21 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"gopkg.in/natefinch/lumberjack.v2"
 
 	"github.com/helixzz/certmaid/internal/backend"
 	"github.com/helixzz/certmaid/internal/config"
 	"github.com/helixzz/certmaid/internal/hook"
 	"github.com/helixzz/certmaid/internal/manager"
+	"github.com/helixzz/certmaid/internal/systemd"
 	"github.com/helixzz/certmaid/internal/writer"
 )
 
@@ -191,6 +195,97 @@ func main() {
 	renewCmd.Flags().StringVarP(&cfgPath, "config", "c", "/etc/certmaid/config.yaml", "config file path")
 	renewCmd.Flags().StringVar(&logLevel, "log-level", "info", "log level")
 
+	installCmd := &cobra.Command{
+		Use:   "install",
+		Short: "Install systemd service and timer units",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			timer, _ := cmd.Flags().GetBool("timer")
+			if !timer {
+				return fmt.Errorf("--timer flag is required for install")
+			}
+
+			if os.Geteuid() != 0 {
+				return fmt.Errorf("install must be run as root")
+			}
+
+			const svcPath = "/etc/systemd/system/certmaid.service"
+			const timerPath = "/etc/systemd/system/certmaid.timer"
+
+			if err := os.WriteFile(svcPath, systemd.ServiceUnit, 0644); err != nil {
+				return fmt.Errorf("writing %s: %w", svcPath, err)
+			}
+			fmt.Printf("Wrote %s\n", svcPath)
+
+			if err := os.WriteFile(timerPath, systemd.TimerUnit, 0644); err != nil {
+				return fmt.Errorf("writing %s: %w", timerPath, err)
+			}
+			fmt.Printf("Wrote %s\n", timerPath)
+
+			if err := exec.Command("systemctl", "daemon-reload").Run(); err != nil {
+				return fmt.Errorf("systemctl daemon-reload: %w", err)
+			}
+
+			if err := exec.Command("systemctl", "enable", "certmaid.timer").Run(); err != nil {
+				return fmt.Errorf("systemctl enable certmaid.timer: %w", err)
+			}
+
+			if err := exec.Command("systemctl", "start", "certmaid.timer").Run(); err != nil {
+				return fmt.Errorf("systemctl start certmaid.timer: %w", err)
+			}
+
+			fmt.Println()
+			fmt.Println("CertMaid timer installed successfully.")
+			fmt.Println()
+			fmt.Println("Management commands:")
+			fmt.Println("  systemctl status certmaid.timer   # Check timer status")
+			fmt.Println("  systemctl start certmaid.service  # Trigger renewal manually")
+			fmt.Println("  journalctl -u certmaid.service    # View logs")
+			fmt.Println("  certmaid uninstall --timer        # Remove timer")
+			return nil
+		},
+	}
+	installCmd.Flags().Bool("timer", false, "install systemd timer unit")
+
+	uninstallCmd := &cobra.Command{
+		Use:   "uninstall",
+		Short: "Remove systemd service and timer units",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			timer, _ := cmd.Flags().GetBool("timer")
+			if !timer {
+				return fmt.Errorf("--timer flag is required for uninstall")
+			}
+
+			if os.Geteuid() != 0 {
+				return fmt.Errorf("uninstall must be run as root")
+			}
+
+			const svcPath = "/etc/systemd/system/certmaid.service"
+			const timerPath = "/etc/systemd/system/certmaid.timer"
+
+			_ = exec.Command("systemctl", "stop", "certmaid.timer").Run()
+			_ = exec.Command("systemctl", "disable", "certmaid.timer").Run()
+
+			if err := os.Remove(svcPath); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("removing %s: %w", svcPath, err)
+			}
+			fmt.Printf("Removed %s\n", svcPath)
+
+			if err := os.Remove(timerPath); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("removing %s: %w", timerPath, err)
+			}
+			fmt.Printf("Removed %s\n", timerPath)
+
+			if err := exec.Command("systemctl", "daemon-reload").Run(); err != nil {
+				return fmt.Errorf("systemctl daemon-reload: %w", err)
+			}
+
+			fmt.Println()
+			fmt.Println("CertMaid timer uninstalled successfully.")
+			return nil
+		},
+	}
+	uninstallCmd.Flags().Bool("timer", false, "remove systemd timer unit")
+
 	configCmd := &cobra.Command{
 		Use:   "config",
 		Short: "Manage configuration",
@@ -236,7 +331,7 @@ func main() {
 	}
 
 	configCmd.AddCommand(configValidateCmd, configShowCmd)
-	rootCmd.AddCommand(runCmd, statusCmd, renewCmd, configCmd, versionCmd)
+	rootCmd.AddCommand(runCmd, statusCmd, renewCmd, installCmd, uninstallCmd, configCmd, versionCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -246,19 +341,82 @@ func main() {
 func buildManager(cfg *config.Config, logger *zap.Logger) (*manager.Manager, error) {
 	var b backend.Backend
 
-	if cfg.Backends.Vault.ACME.Enabled {
-		vaultURL := cfg.Backends.Vault.ACME.DirectoryURL
+	v := cfg.Backends.Vault
+
+	if v.ACME.Enabled {
+		vaultURL := v.ACME.DirectoryURL
 		if vaultURL == "" {
 			return nil, fmt.Errorf("vault ACME directory URL is required when vault ACME is enabled")
 		}
-		eabKid := cfg.Backends.Vault.ACME.EAB.KID
-		eabKey := cfg.Backends.Vault.ACME.EAB.HMACKey
+		eabKid := v.ACME.EAB.KID
+		eabKey := v.ACME.EAB.HMACKey
 		if eabKey == "" {
 			eabKey = os.Getenv("VAULT_EAB_HMAC_KEY")
 		}
 		b = backend.NewVaultBackend(vaultURL, eabKid, eabKey)
+	} else if v.API.Enabled {
+		addr := v.API.Address
+		if addr == "" {
+			addr = os.Getenv("VAULT_ADDR")
+		}
+		if addr == "" {
+			return nil, fmt.Errorf("vault API address is required when vault API is enabled")
+		}
+
+		mountPath := v.API.PKI.MountPath
+		if mountPath == "" {
+			mountPath = "pki"
+		}
+		role := v.API.PKI.Role
+		if role == "" {
+			return nil, fmt.Errorf("vault API PKI role is required when vault API is enabled")
+		}
+
+		vb, err := backend.NewVaultAPIBackend(addr, mountPath, role)
+		if err != nil {
+			return nil, fmt.Errorf("creating vault API backend: %w", err)
+		}
+
+		auth := v.API.Auth
+		switch {
+		case auth.TokenFile != "":
+			tokenBytes, err := os.ReadFile(auth.TokenFile)
+			if err != nil {
+				return nil, fmt.Errorf("reading vault token file %s: %w", auth.TokenFile, err)
+			}
+			vb.SetToken(strings.TrimSpace(string(tokenBytes)))
+
+		case os.Getenv("VAULT_TOKEN") != "":
+			vb.SetToken(os.Getenv("VAULT_TOKEN"))
+
+		case auth.AppRole.RoleIDFile != "" && auth.AppRole.SecretIDFile != "":
+			roleIDBytes, err := os.ReadFile(auth.AppRole.RoleIDFile)
+			if err != nil {
+				return nil, fmt.Errorf("reading approle role_id file: %w", err)
+			}
+			secretIDBytes, err := os.ReadFile(auth.AppRole.SecretIDFile)
+			if err != nil {
+				return nil, fmt.Errorf("reading approle secret_id file: %w", err)
+			}
+			if err := vb.LoginWithAppRole(strings.TrimSpace(string(roleIDBytes)), strings.TrimSpace(string(secretIDBytes))); err != nil {
+				return nil, fmt.Errorf("approle login: %w", err)
+			}
+
+		case auth.TLSCert.CertFile != "" && auth.TLSCert.KeyFile != "":
+			roleName := auth.TLSCert.RoleName
+			if roleName == "" {
+				roleName = "certmaid"
+			}
+			if err := vb.LoginWithCert(auth.TLSCert.CertFile, auth.TLSCert.KeyFile, roleName); err != nil {
+				return nil, fmt.Errorf("cert login: %w", err)
+			}
+
+		default:
+			return nil, fmt.Errorf("vault API enabled but no authentication configured: set token_file, approle, tls_cert, or VAULT_TOKEN env var")
+		}
+		b = vb
 	} else {
-		return nil, fmt.Errorf("no CA backend configured: enable vault ACME")
+		return nil, fmt.Errorf("no CA backend configured: enable vault.acme or vault.api in config")
 	}
 
 	w := writer.NewFileWriter(cfg.Output.BaseDir)
@@ -280,11 +438,22 @@ func newLogger(level string) *zap.Logger {
 		zapLevel = zapcore.InfoLevel
 	}
 
-	cfg := zap.NewProductionConfig()
-	cfg.Level = zap.NewAtomicLevelAt(zapLevel)
-	cfg.Encoding = "console"
-	cfg.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+	logFile := os.Getenv("CERTMAID_LOG_FILE")
+	var ws zapcore.WriteSyncer
+	if logFile != "" {
+		lj := &lumberjack.Logger{
+			Filename:   logFile,
+			MaxSize:    100,
+			MaxBackups: 7,
+		}
+		ws = zapcore.AddSync(lj)
+	} else {
+		ws = zapcore.AddSync(os.Stderr)
+	}
 
-	logger, _ := cfg.Build()
-	return logger
+	cfg := zap.NewProductionEncoderConfig()
+	cfg.EncodeTime = zapcore.ISO8601TimeEncoder
+
+	core := zapcore.NewCore(zapcore.NewConsoleEncoder(cfg), ws, zapLevel)
+	return zap.New(core)
 }

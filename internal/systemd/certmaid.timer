@@ -1,0 +1,11 @@
+[Unit]
+Description=CertMaid Periodic Certificate Check
+Documentation=https://github.com/helixzz/certmaid
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=12h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

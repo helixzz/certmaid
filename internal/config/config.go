@@ -39,7 +39,8 @@ type BackendsConfig struct {
 
 // VaultConfig holds HashiCorp Vault backend configuration.
 type VaultConfig struct {
-	ACME ACMEConfig `mapstructure:"acme"`
+	ACME ACMEConfig     `mapstructure:"acme"`
+	API  VaultAPIConfig `mapstructure:"api"`
 }
 
 // ACMEConfig holds ACME-specific configuration for Vault.
@@ -53,6 +54,47 @@ type ACMEConfig struct {
 type EABConfig struct {
 	KID     string `mapstructure:"kid"`
 	HMACKey string `mapstructure:"hmac_key"`
+}
+
+// VaultAPIConfig holds configuration for the Vault API direct connection backend.
+type VaultAPIConfig struct {
+	Enabled bool          `mapstructure:"enabled"`
+	Address string        `mapstructure:"address"`
+	Auth    APIAuthConfig `mapstructure:"auth"`
+	PKI     PKIConfig     `mapstructure:"pki"`
+	TLS     TLSConfig     `mapstructure:"tls"`
+}
+
+// APIAuthConfig holds authentication configuration for the Vault API backend.
+type APIAuthConfig struct {
+	TokenFile string        `mapstructure:"token_file"`
+	AppRole   AppRoleConfig `mapstructure:"approle"`
+	TLSCert   TLSCertConfig `mapstructure:"tls_cert"`
+}
+
+// AppRoleConfig holds AppRole authentication configuration.
+type AppRoleConfig struct {
+	RoleIDFile   string `mapstructure:"role_id_file"`
+	SecretIDFile string `mapstructure:"secret_id_file"`
+}
+
+// TLSCertConfig holds TLS client certificate authentication configuration.
+type TLSCertConfig struct {
+	CertFile string `mapstructure:"cert_file"`
+	KeyFile  string `mapstructure:"key_file"`
+	RoleName string `mapstructure:"role_name"`
+}
+
+// PKIConfig holds Vault PKI mount and role configuration.
+type PKIConfig struct {
+	MountPath string `mapstructure:"mount_path"`
+	Role      string `mapstructure:"role"`
+}
+
+// TLSConfig holds TLS connection configuration for the Vault API backend.
+type TLSConfig struct {
+	CACertFile         string `mapstructure:"ca_cert_file"`
+	InsecureSkipVerify bool   `mapstructure:"insecure_skip_verify"`
 }
 
 // GlobalOutputConfig holds global output path configuration.
