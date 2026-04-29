@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
@@ -145,22 +146,41 @@ func main() {
 				return fmt.Errorf("checking status: %w", err)
 			}
 
-			fmt.Printf("%-25s %-12s %-10s %-30s\n", "NAME", "EXPIRES", "RENEW?", "DOMAINS")
-			fmt.Println("-------------------------------------------------------------------------------------------")
+			fmt.Printf("%-25s %-12s %-10s %-10s %-10s %-30s %-30s %-30s\n", "NAME", "EXPIRES", "DAYS LEFT", "RENEW?", "HEALTH", "DOMAINS", "CERT PATH", "KEY PATH")
+			fmt.Println("--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------")
 			for _, s := range statuses {
 				renew := "NO"
 				if s.NeedsRenew {
 					renew = "YES"
 				}
 				expires := s.NotAfter.Format("2006-01-02")
+				daysLeft := "-"
+				health := "MISSING"
 				if s.NotAfter.IsZero() {
 					expires = "not found"
+				} else {
+					daysLeft = fmt.Sprintf("%d", int(time.Until(s.NotAfter).Hours()/24))
+					if s.NotAfter.Before(time.Now()) {
+						health = "EXPIRED"
+					} else if s.NeedsRenew {
+						health = "RENEW"
+					} else {
+						health = "OK"
+					}
 				}
 				domains := s.Domains[0]
 				if len(s.Domains) > 1 {
 					domains += fmt.Sprintf(" (+%d more)", len(s.Domains)-1)
 				}
-				fmt.Printf("%-25s %-12s %-10s %-30s\n", s.Name, expires, renew, domains)
+				certPath := s.CertPath
+				if certPath == "" {
+					certPath = "-"
+				}
+				keyPath := s.KeyPath
+				if keyPath == "" {
+					keyPath = "-"
+				}
+				fmt.Printf("%-25s %-12s %-10s %-10s %-10s %-30s %-30s %-30s\n", s.Name, expires, daysLeft, renew, health, domains, certPath, keyPath)
 			}
 			return nil
 		},

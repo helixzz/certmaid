@@ -279,6 +279,8 @@ func (m *Manager) certStatus(spec certmaid.CertificateSpec) certmaid.Certificate
 	status.NotAfter = notAfter
 	status.NeedsRenew = time.Until(notAfter) < renewBefore
 
+	m.checkAlert(status, spec)
+
 	return status
 }
 
@@ -310,4 +312,36 @@ func extractNotAfter(certPEM []byte) (time.Time, error) {
 	}
 
 	return cert.NotAfter, nil
+}
+
+// checkAlert logs a warning if the certificate is approaching expiry but has not
+// yet entered the renewal window. This provides early visibility before auto-renewal.
+func (m *Manager) checkAlert(status certmaid.CertificateStatus, spec certmaid.CertificateSpec) {
+	if status.NotAfter.IsZero() {
+		return // no cert file, nothing to alert on
+	}
+
+	alertBefore := spec.AlertBefore
+	if alertBefore == 0 {
+		alertBefore = m.config.Defaults.AlertBefore
+	}
+	renewBefore := spec.RenewBefore
+	if renewBefore == 0 {
+		renewBefore = m.config.Defaults.RenewBefore
+	}
+
+	// Only alert if alert_before is meaningful (longer than renew_before)
+	// and the cert is within the alert window but NOT yet in the renew window
+	daysRemaining := int(time.Until(status.NotAfter).Hours() / 24)
+
+	if alertBefore > 0 && alertBefore > renewBefore {
+		remaining := time.Until(status.NotAfter)
+		if remaining < alertBefore && !status.NeedsRenew {
+			m.logger.Warn("certificate approaching expiry",
+				zap.String("name", spec.Name),
+				zap.Int("days_remaining", daysRemaining),
+				zap.Time("not_after", status.NotAfter),
+			)
+		}
+	}
 }

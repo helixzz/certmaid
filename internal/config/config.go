@@ -25,6 +25,7 @@ type Config struct {
 // DefaultsConfig holds global default values for certificate management.
 type DefaultsConfig struct {
 	RenewBefore   time.Duration `mapstructure:"renew_before"`
+	AlertBefore   time.Duration `mapstructure:"alert_before"`
 	CheckInterval time.Duration `mapstructure:"check_interval"`
 	KeyType       string        `mapstructure:"key_type"`
 	KeyAlgorithm  string        `mapstructure:"key_algorithm"`
@@ -125,6 +126,7 @@ func Load(path string) (*Config, error) {
 
 	// Apply defaults before reading the file so they take effect when keys are absent.
 	v.SetDefault("defaults.renew_before", "720h")
+	v.SetDefault("defaults.alert_before", "336h")
 	v.SetDefault("defaults.key_type", "RSA2048")
 	v.SetDefault("defaults.key_algorithm", "rsa")
 	v.SetDefault("defaults.cert_dir_mode", 0750)

@@ -17,6 +17,7 @@ import (
 	"github.com/helixzz/certmaid"
 	"github.com/helixzz/certmaid/internal/config"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest"
 )
 
 // mockBackend implements certmaid.Backend for testing.
@@ -605,5 +606,41 @@ func TestRun_PerCertHookOverride(t *testing.T) {
 
 	if result.Renewed != 1 {
 		t.Errorf("expected Renewed=1, got %d", result.Renewed)
+	}
+}
+
+func TestStatus_EarlyExpiryAlert(t *testing.T) {
+	dir := t.TempDir()
+
+	cfg := testConfig()
+	cfg.Output.BaseDir = dir
+	cfg.Certificates[0].RenewBefore = 10 * 24 * time.Hour
+	cfg.Certificates[0].AlertBefore = 25 * 24 * time.Hour
+
+	certPath := filepath.Join(dir, "live", "test-cert", "cert.pem")
+	if err := os.MkdirAll(filepath.Dir(certPath), 0750); err != nil {
+		t.Fatal(err)
+	}
+	midCert := generateTestCertPEM(time.Now().Add(20 * 24 * time.Hour))
+	if err := os.WriteFile(certPath, midCert, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr := New(cfg, &mockBackend{}, &mockWriter{}, &mockHookRunner{}, zaptest.NewLogger(t))
+
+	statuses, err := mgr.Status(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(statuses) != 1 {
+		t.Fatalf("expected 1 status, got %d", len(statuses))
+	}
+
+	if statuses[0].NeedsRenew {
+		t.Error("expected NeedsRenew=false for cert in alert window but not in renew window")
+	}
+	if statuses[0].Name != "test-cert" {
+		t.Errorf("expected name test-cert, got %s", statuses[0].Name)
 	}
 }

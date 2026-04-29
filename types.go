@@ -13,6 +13,7 @@ type CertificateSpec struct {
 	Backend   string   `mapstructure:"backend" yaml:"backend"` // "vault"
 
 	RenewBefore    time.Duration `mapstructure:"renew_before" yaml:"renew_before"`
+	AlertBefore    time.Duration `mapstructure:"alert_before" yaml:"alert_before"`
 	KeyType        string        `mapstructure:"key_type" yaml:"key_type"` // RSA2048, ECDSA256, ECDSA384
 
 	Output         OutputConfig         `mapstructure:"output" yaml:"output"`
