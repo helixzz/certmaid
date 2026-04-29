@@ -31,6 +31,12 @@ type OutputConfig struct {
 // BackendOverrideConfig allows per-certificate backend overrides.
 type BackendOverrideConfig struct {
 	Vault *VaultOverride `mapstructure:"vault" yaml:"vault"`
+	ADCS  *ADCSOverride  `mapstructure:"adcs" yaml:"adcs"`
+}
+
+// ADCSOverride allows overriding AD CS (NDES/SCEP) settings per certificate.
+type ADCSOverride struct {
+	Template string `mapstructure:"template" yaml:"template"`
 }
 
 // VaultOverride allows overriding Vault PKI settings per certificate.

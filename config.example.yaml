@@ -24,6 +24,15 @@ backends:
         kid: ""
         hmac_key: "${VAULT_EAB_HMAC_KEY}"   # 从环境变量读取
 
+  # AD CS (NDES/SCEP)
+  # adcs:
+  #   enabled: false
+  #   server_url: "https://ndes-server.example.com/certsrv/mscep/mscep.dll"
+  #   challenge_password: "${ADCS_CHALLENGE_PASSWORD}"
+  #   ca_fingerprint: ""
+  #   poll_interval: 30s
+  #   poll_timeout: 300s
+
 # 输出路径
 output:
   base_dir: "/etc/certmaid/certs"

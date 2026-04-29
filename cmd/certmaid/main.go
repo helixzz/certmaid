@@ -472,8 +472,34 @@ func buildManager(cfg *config.Config, logger *zap.Logger) (*manager.Manager, err
 			return nil, fmt.Errorf("vault API enabled but no authentication configured: set token_file, approle, or tls_cert")
 		}
 		b = vb
+	} else if cfg.Backends.ADCS.Enabled {
+		a := cfg.Backends.ADCS
+
+		if a.ServerURL == "" {
+			return nil, fmt.Errorf("AD CS server URL is required when AD CS is enabled")
+		}
+		if a.ChallengePassword == "" {
+			return nil, fmt.Errorf("AD CS challenge_password is required when AD CS is enabled")
+		}
+
+		pollInterval := a.PollInterval
+		if pollInterval == 0 {
+			pollInterval = 30 * time.Second
+		}
+		pollTimeout := a.PollTimeout
+		if pollTimeout == 0 {
+			pollTimeout = 300 * time.Second
+		}
+
+		b = backend.NewADCSBackend(
+			a.ServerURL,
+			a.ChallengePassword,
+			a.CAFingerprint,
+			pollInterval,
+			pollTimeout,
+		)
 	} else {
-		return nil, fmt.Errorf("no CA backend configured: enable vault.acme or vault.api in config")
+		return nil, fmt.Errorf("no CA backend configured: enable vault.acme, vault.api, or adcs in config")
 	}
 
 	w := writer.NewFileWriter(cfg.Output.BaseDir)

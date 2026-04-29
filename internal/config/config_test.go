@@ -236,12 +236,54 @@ certificates:
   - name: test-cert
     domains:
       - example.com
-    backend: adcs
+    backend: unsupported
 `
 	path := writeTempConfig(t, unsupportedBackendYAML)
 	_, err := Load(path)
 	if err == nil {
 		t.Fatal("Load() should return error for unsupported backend")
+	}
+}
+
+func TestValidate_BackendADCS(t *testing.T) {
+	const adcsYAML = `
+defaults:
+  renew_before: 720h
+  check_interval: 12h
+  key_type: RSA2048
+  key_algorithm: rsa
+  challenge: http-01
+  cert_dir_mode: 0750
+  cert_file_mode: 0640
+backends:
+  vault:
+    acme:
+      enabled: true
+      directory_url: "https://vault.example.com:8200/v1/pki/acme/directory"
+      eab:
+        kid: "my-kid"
+        hmac_key: "my-hmac-key"
+output:
+  base_dir: "/etc/certmaid/certs"
+hooks:
+  post_renew:
+    nginx_reload: true
+logging:
+  level: info
+  format: json
+certificates:
+  - name: example-adcs
+    domains:
+      - adcs.example.com
+    backend: adcs
+`
+	path := writeTempConfig(t, adcsYAML)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() unexpected error for adcs backend: %v", err)
+	}
+	if cfg.Certificates[0].Backend != "adcs" {
+		t.Errorf("Backend = %q, want %q", cfg.Certificates[0].Backend, "adcs")
 	}
 }
 

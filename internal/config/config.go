@@ -37,6 +37,17 @@ type DefaultsConfig struct {
 // BackendsConfig holds CA backend configurations.
 type BackendsConfig struct {
 	Vault VaultConfig `mapstructure:"vault"`
+	ADCS  ADCSConfig  `mapstructure:"adcs"`
+}
+
+// ADCSConfig holds Active Directory Certificate Services (NDES/SCEP) backend configuration.
+type ADCSConfig struct {
+	Enabled           bool          `mapstructure:"enabled"`
+	ServerURL         string        `mapstructure:"server_url"`
+	ChallengePassword string        `mapstructure:"challenge_password"`
+	CAFingerprint     string        `mapstructure:"ca_fingerprint"`
+	PollInterval      time.Duration `mapstructure:"poll_interval"`
+	PollTimeout       time.Duration `mapstructure:"poll_timeout"`
 }
 
 // VaultConfig holds HashiCorp Vault backend configuration.
@@ -133,6 +144,8 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("defaults.cert_file_mode", 0640)
 	v.SetDefault("logging.level", "info")
 	v.SetDefault("logging.format", "json")
+	v.SetDefault("backends.adcs.poll_interval", "30s")
+	v.SetDefault("backends.adcs.poll_timeout", "300s")
 
 	if err := v.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("reading config file %q: %w", path, err)
@@ -197,8 +210,8 @@ func (c *Config) validate() error {
 		if cert.Backend == "" {
 			return fmt.Errorf("%s: backend is required", prefix)
 		}
-		if cert.Backend != "vault" {
-			return fmt.Errorf("%s: unsupported backend %q, only \"vault\" is supported", prefix, cert.Backend)
+		if cert.Backend != "vault" && cert.Backend != "adcs" {
+			return fmt.Errorf("%s: unsupported backend %q, only \"vault\" and \"adcs\" are supported", prefix, cert.Backend)
 		}
 	}
 

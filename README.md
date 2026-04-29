@@ -36,7 +36,7 @@ sudo certmaid install --timer
 | 后端 | 状态 | 验证方式 |
 |------|------|----------|
 | HashiCorp Vault PKI（1.15+） | ✅ 一期支持 | HTTP-01 ACME |
-| Active Directory CS | 🔲 远期规划 | 待定 |
+| Active Directory CS（NDES/SCEP） | ✅ v1.1.0 | SCEP |
 
 ## 支持的验证方式
 
